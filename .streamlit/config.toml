@@ -1,0 +1,52 @@
+[theme]
+base = "light"
+primaryColor = "#12664f"
+backgroundColor = "#f7f4ee"
+secondaryBackgroundColor = "#eef4f1"
+textColor = "#1d3b40"
+borderColor = "#d1ddd7"
+dataframeBorderColor = "#d1ddd7"
+codeBackgroundColor = "#eef4f1"
+codeTextColor = "#1d3b40"
+showWidgetBorder = true
+chartCategoricalColors = ["#12664f", "#b86b32", "#6f8fa1", "#d4b483", "#b22234"]
+chartSequentialColors = ["#f7f4ee", "#f3eadf", "#eedfce", "#e8d4be", "#e1c9af", "#d8bc9d", "#c5ab88", "#ad9475", "#7f7f66", "#12664f"]
+chartDivergingColors = ["#8e1d2b", "#b22234", "#cb5661", "#de9398", "#f0d0d0", "#edf3ef", "#cfe2da", "#9fc5b8", "#5fa38b", "#12664f"]
+
+[theme.sidebar]
+backgroundColor = "#f2f5f2"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1d3b40"
+borderColor = "#d1ddd7"
+
+[theme.light]
+primaryColor = "#12664f"
+backgroundColor = "#f7f4ee"
+secondaryBackgroundColor = "#eef4f1"
+textColor = "#1d3b40"
+borderColor = "#d1ddd7"
+dataframeBorderColor = "#d1ddd7"
+codeBackgroundColor = "#eef4f1"
+codeTextColor = "#1d3b40"
+
+[theme.light.sidebar]
+backgroundColor = "#f2f5f2"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1d3b40"
+borderColor = "#d1ddd7"
+
+[theme.dark]
+primaryColor = "#3db8a2"
+backgroundColor = "#09131a"
+secondaryBackgroundColor = "#111d25"
+textColor = "#e7f0f2"
+borderColor = "#2a4654"
+dataframeBorderColor = "#2a4654"
+codeBackgroundColor = "#111d25"
+codeTextColor = "#e7f0f2"
+
+[theme.dark.sidebar]
+backgroundColor = "#0d1720"
+secondaryBackgroundColor = "#111d25"
+textColor = "#e7f0f2"
+borderColor = "#2a4654"

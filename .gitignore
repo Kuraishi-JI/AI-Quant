@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.pytest_temp/
+build/
+dist/
+*.egg-info/
+
+# Local app and reference-project environments
+.venv/
+.env
+.env.*
+
+# Local Streamlit secrets
+.streamlit/secrets.toml
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "responsible-quant-advisory-workbench"
+version = "0.1.0"
+description = "A team-developed Streamlit workbench for explainable, risk-governed portfolio recommendation research."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "HKUST(GZ) SOCH 5000 Team 1" }
+]
+keywords = [
+  "streamlit",
+  "quantitative-finance",
+  "backtesting",
+  "risk-management",
+  "explainable-ai",
+]
+dependencies = [
+  "streamlit>=1.55,<2.0",
+  "pandas>=2.2,<3.0",
+  "numpy>=1.26,<3.0",
+  "scipy>=1.13,<2.0",
+  "scikit-learn>=1.4,<2.0",
+  "plotly>=6.0,<7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0,<9.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]
