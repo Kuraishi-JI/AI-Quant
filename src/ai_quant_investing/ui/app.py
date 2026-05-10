@@ -11,6 +11,29 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
+from ..assistant import (
+    AssistantSettings,
+    DEFAULT_THREAD_TITLE,
+    build_run_snapshot,
+    clear_chat_state,
+    create_chat_thread,
+    delete_chat_message,
+    delete_chat_thread,
+    edit_user_chat_message_for_regeneration,
+    ensure_chat_threads,
+    find_context,
+    generate_assistant_response,
+    get_active_chat_thread,
+    redact_secrets,
+    set_active_thread_title_from_messages,
+    unknown_context,
+)
+from ..assistant_llm_settings import (
+    get_assistant_default_model,
+    get_assistant_models_for_provider,
+    get_assistant_providers,
+    resolve_assistant_runtime_config,
+)
 from ..core.data import DEFAULT_UNIVERSE, generate_demo_prices, load_prices_from_csv
 from ..core.pipeline import PrototypeConfig, PrototypeResult, run_prototype
 from ..explainability.analysis import (
@@ -21,6 +44,7 @@ from ..explainability.analysis import (
     standardized_importance,
     what_if_curve,
 )
+from ..llm.catalog import get_api_key_env
 
 WINDOW_LOOKBACKS = {"3M": 63, "6M": 126, "1Y": 252, "2Y": 504, "Full": None}
 MONTH_ORDER = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -211,6 +235,25 @@ def _display_cell(value: object, *, max_chars: int = TABLE_TEXT_MAX_CHARS) -> ob
     if isinstance(value, (list, tuple, set, dict)):
         return _truncate_display_text(str(value), max_chars=max_chars)
     return value
+
+
+def _format_model_option(model) -> str:
+    return model.display_name
+
+
+def _model_detail(model) -> str:
+    flags = []
+    if model.supports_reasoning:
+        flags.append("reasoning")
+    if model.supports_structured_output:
+        flags.append("structured")
+    if model.supports_tool_calling:
+        flags.append("tools")
+    flag_text = ", ".join(flags) or "basic"
+    return (
+        f"`{model.model_id}` | {model.capability_tier} | {model.cost_tier} cost | "
+        f"{model.latency_tier} latency | {flag_text}"
+    )
 
 
 def _prepare_display_frame(frame: pd.DataFrame, *, max_text: int = TABLE_TEXT_MAX_CHARS) -> pd.DataFrame:
@@ -901,6 +944,7 @@ def _render_theme(theme_name: str) -> None:
         <style>
         :root {{
 {root_vars}
+            --assistant-drawer-top: 3.25rem;
         }}
         {dark_css_block}
         html, body, [class*="css"] {{
@@ -1943,6 +1987,145 @@ def _render_theme(theme_name: str) -> None:
         .export-divider {{
             height: 0.7rem;
         }}
+        .assistant-rail-anchor {{
+            height: 0;
+        }}
+        @media (min-width: 1121px) {{
+            html.aq-assistant-expanded .block-container {{
+                padding-right: calc(min(420px, calc(100vw - 3.2rem)) + 1rem) !important;
+            }}
+        }}
+        div[data-testid="stVerticalBlock"]:has(> div:first-child .assistant-rail-anchor),
+        div[data-testid="stVerticalBlock"]:has(.assistant-rail-anchor):not(:has(.brand-shell)):not(:has(.hero)):not(:has(.workstation-shell)):not(:has(.command-shell)),
+        .st-key-assistant-drawer {{
+            position: fixed !important;
+            top: var(--assistant-drawer-top) !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: min(420px, calc(100vw - 3.2rem)) !important;
+            height: calc(100vh - var(--assistant-drawer-top)) !important;
+            z-index: 900000 !important;
+            overflow-y: auto !important;
+            box-sizing: border-box !important;
+            padding: 0.9rem 0.86rem 1rem 0.86rem !important;
+            background:
+                radial-gradient(circle at top, var(--bg-right), transparent 24%),
+                linear-gradient(180deg, var(--sidebar-start), var(--sidebar-end));
+            border-left: 1px solid var(--border-color);
+            box-shadow: -18px 0 36px rgba(8, 22, 32, 0.12);
+            transform: translateX(calc(100% + 2px));
+            visibility: hidden;
+            pointer-events: none;
+            transition: transform 0.18s ease, visibility 0.18s ease;
+        }}
+        html.aq-assistant-expanded div[data-testid="stVerticalBlock"]:has(> div:first-child .assistant-rail-anchor),
+        html.aq-assistant-expanded div[data-testid="stVerticalBlock"]:has(.assistant-rail-anchor):not(:has(.brand-shell)):not(:has(.hero)):not(:has(.workstation-shell)):not(:has(.command-shell)),
+        html.aq-assistant-expanded .st-key-assistant-drawer {{
+            transform: translateX(0);
+            visibility: visible;
+            pointer-events: auto;
+        }}
+        div[data-testid="stVerticalBlock"]:has(> div:first-child .assistant-rail-anchor)::-webkit-scrollbar,
+        div[data-testid="stVerticalBlock"]:has(.assistant-rail-anchor):not(:has(.brand-shell)):not(:has(.hero)):not(:has(.workstation-shell)):not(:has(.command-shell))::-webkit-scrollbar,
+        .st-key-assistant-drawer::-webkit-scrollbar {{
+            width: 0.35rem;
+        }}
+        div[data-testid="stVerticalBlock"]:has(> div:first-child .assistant-rail-anchor)::-webkit-scrollbar-thumb,
+        div[data-testid="stVerticalBlock"]:has(.assistant-rail-anchor):not(:has(.brand-shell)):not(:has(.hero)):not(:has(.workstation-shell)):not(:has(.command-shell))::-webkit-scrollbar-thumb,
+        .st-key-assistant-drawer::-webkit-scrollbar-thumb {{
+            background: var(--border-color);
+            border-radius: 999px;
+        }}
+        .assistant-rail-head {{
+            position: relative;
+            overflow: hidden;
+            padding: 0.82rem 0.9rem;
+            margin: 0.02rem 0 0.62rem 0;
+            border-radius: 0.95rem;
+            background: linear-gradient(180deg, var(--surface-strong), var(--surface-alt));
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-lg);
+        }}
+        .assistant-rail-head::before {{
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-color), var(--accent-soft));
+        }}
+        .assistant-rail-kicker {{
+            font-size: 0.68rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted-color);
+            margin-bottom: 0.16rem;
+        }}
+        .assistant-rail-title {{
+            font-size: 1.08rem;
+            line-height: 1.1;
+            color: var(--heading-color);
+            font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+        }}
+        .assistant-rail-copy {{
+            margin-top: 0.28rem;
+            font-size: 0.82rem;
+            line-height: 1.35;
+            color: var(--text-color);
+        }}
+        div[data-testid="stVerticalBlock"]:has(> div:first-child .assistant-rail-anchor) div[data-testid="stChatMessage"],
+        div[data-testid="stVerticalBlock"]:has(.assistant-rail-anchor):not(:has(.brand-shell)):not(:has(.hero)):not(:has(.workstation-shell)):not(:has(.command-shell)) div[data-testid="stChatMessage"],
+        .st-key-assistant-drawer div[data-testid="stChatMessage"] {{
+            background: var(--surface-soft);
+            border: 1px solid var(--border-soft);
+            border-radius: 0.82rem;
+            padding: 0.42rem 0.55rem;
+            margin-bottom: 0.44rem;
+        }}
+        div[data-testid="stVerticalBlock"]:has(> div:first-child .assistant-rail-anchor) .stChatFloatingInputContainer,
+        div[data-testid="stVerticalBlock"]:has(.assistant-rail-anchor):not(:has(.brand-shell)):not(:has(.hero)):not(:has(.workstation-shell)):not(:has(.command-shell)) .stChatFloatingInputContainer,
+        .st-key-assistant-drawer .stChatFloatingInputContainer {{
+            position: static;
+        }}
+        div[data-baseweb="popover"],
+        div[data-baseweb="popover"] > div {{
+            z-index: 950000 !important;
+        }}
+        div[data-baseweb="popover"] div[role="listbox"] {{
+            max-height: 18rem;
+            overflow-y: auto;
+            box-shadow: 0 18px 34px rgba(8, 22, 32, 0.18);
+        }}
+        .assistant-edge-toggle {{
+            position: fixed;
+            top: 50%;
+            right: 0;
+            transform: translateY(-50%);
+            z-index: 960000;
+            appearance: none;
+            width: 2.7rem;
+            height: 4.6rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.85rem 0 0 0.85rem;
+            border: 1px solid var(--border-color);
+            border-right: 0;
+            background: linear-gradient(180deg, var(--surface-strong), var(--surface-alt));
+            color: var(--accent-color) !important;
+            font-size: 1.05rem;
+            font-weight: 800;
+            line-height: 1;
+            text-decoration: none !important;
+            box-shadow: var(--shadow-lg);
+            cursor: pointer;
+        }}
+        .assistant-edge-toggle:hover {{
+            color: var(--accent-color) !important;
+            filter: brightness(1.04);
+            text-decoration: none !important;
+        }}
         hr {{
             border-color: var(--border-soft);
         }}
@@ -1953,6 +2136,11 @@ def _render_theme(theme_name: str) -> None:
             }}
             .workstation-grid {{
                 grid-template-columns: 1fr 1fr;
+            }}
+            div[data-testid="stVerticalBlock"]:has(> div:first-child .assistant-rail-anchor),
+            div[data-testid="stVerticalBlock"]:has(.assistant-rail-anchor):not(:has(.brand-shell)):not(:has(.hero)):not(:has(.workstation-shell)):not(:has(.command-shell)),
+            .st-key-assistant-drawer {{
+                width: min(390px, calc(100vw - 3rem)) !important;
             }}
         }}
         @media (max-width: 780px) {{
@@ -1978,6 +2166,11 @@ def _render_theme(theme_name: str) -> None:
             .hero-stat {{
                 backdrop-filter: none;
             }}
+            div[data-testid="stVerticalBlock"]:has(> div:first-child .assistant-rail-anchor),
+            div[data-testid="stVerticalBlock"]:has(.assistant-rail-anchor):not(:has(.brand-shell)):not(:has(.hero)):not(:has(.workstation-shell)):not(:has(.command-shell)),
+            .st-key-assistant-drawer {{
+                width: calc(100vw - 2.8rem) !important;
+            }}
         }}
         @keyframes fadeInUp {{
             from {{
@@ -2001,28 +2194,30 @@ def _hero() -> None:
         <div class="hero">
             <div class="hero-grid">
                 <div class="hero-copy">
-                    <div class="hero-kicker">Collaborative Research Platform</div>
+                    <div class="hero-kicker">Iterative Research Workbench</div>
                     <h1>{APP_DISPLAY_NAME}</h1>
                     <p>
-                        Developed by the {TEAM_DISPLAY_NAME}, this workbench links interpretable signal generation,
-                        portfolio construction, risk guardrails, and explanation-led review in one interface. The
-                        default workflow runs on a reproducible reference market dataset, and the same analysis can
-                        switch to your own wide price CSV.
+                        Developed by the {TEAM_DISPLAY_NAME}, this iteration presents the project as a responsible
+                        decision-support workflow: interpretable signals become portfolio weights, risk guardrails
+                        remain visible, and every run can be reviewed through charts, exports, and the assistant panel.
+                        The default workflow uses a reproducible reference market, while uploaded price tables support
+                        follow-up experiments.
                     </p>
                     <div class="chip-row">
                         <span class="caption-chip">Signals</span>
                         <span class="caption-chip">Risk Guardrails</span>
                         <span class="caption-chip">Stress Review</span>
+                        <span class="caption-chip">LLM Assistant</span>
                         <span class="caption-chip">Model Explainability</span>
                     </div>
                 </div>
                 <div class="hero-side">
                     <div class="hero-side-panel">
-                        <div class="hero-side-kicker">Platform Positioning</div>
-                        <div class="hero-side-value">Team-built decision-support workbench</div>
+                        <div class="hero-side-kicker">Project Positioning</div>
+                        <div class="hero-side-value">Explainable advisory workflow</div>
                         <div class="hero-side-copy">
-                            Designed to support analyst review of model-driven portfolio recommendations rather than
-                            position the system as fully autonomous trading software.
+                            The application is positioned as a reviewable research environment for project evaluation,
+                            analyst discussion, and controlled iteration, not as autonomous trading software.
                         </div>
                     </div>
                     <div class="hero-stat-grid">
@@ -2042,9 +2237,9 @@ def _hero() -> None:
                             <div class="hero-stat-copy">Each signal can be explained with drivers, buckets, and what-if views.</div>
                         </div>
                         <div class="hero-stat">
-                            <div class="hero-stat-label">Deployment</div>
+                            <div class="hero-stat-label">Iteration</div>
                             <div class="hero-stat-value">Offline-first</div>
-                            <div class="hero-stat-copy">Runs on the reference dataset and can switch to uploaded prices.</div>
+                            <div class="hero-stat-copy">Runs on the reference dataset, accepts uploads, and supports assistant Q&A.</div>
                         </div>
                     </div>
                 </div>
@@ -2059,7 +2254,7 @@ def _hero() -> None:
         """
         <div class="mini-card compact intro-card">
             <h3>Signal Research Layer</h3>
-            <p>Signals become portfolio weights first, then the same weight ledger drives both risk control and backtesting.</p>
+            <p>Signals become portfolio weights first, so the project can explain how ranking decisions turn into portfolio exposure.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2068,7 +2263,7 @@ def _hero() -> None:
         """
         <div class="mini-card compact intro-card">
             <h3>Risk Governance Layer</h3>
-            <p>Rolling volatility, VaR, expected shortfall, drawdowns, crisis windows, and scenario shocks remain visible for review.</p>
+            <p>Rolling volatility, VaR, expected shortfall, drawdowns, crisis windows, and scenario shocks stay visible throughout the review.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2077,7 +2272,7 @@ def _hero() -> None:
         """
         <div class="mini-card compact intro-card">
             <h3>Explanation Layer</h3>
-            <p>Global feature importance, local driver breakdowns, and one-factor what-if views explain why the model chose each position.</p>
+            <p>Global importance, local drivers, what-if views, and the assistant help turn model behavior into a defensible project narrative.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2093,13 +2288,13 @@ def _build_brand_banner() -> None:
                 <div class="brand-overline">{TEAM_DISPLAY_NAME}</div>
                 <div class="brand-title">{APP_DISPLAY_NAME}</div>
                 <div class="brand-subtitle">
-                    A team-developed research interface for portfolio recommendation, risk-governed backtesting, and
-                    explanation-led signal review.
+                    A team-developed project iteration for portfolio recommendation, risk-governed backtesting,
+                    explanation-led review, and assistant-supported Q&A.
                 </div>
                 <div class="brand-pills">
-                    <span class="brand-pill">Team Developed</span>
+                    <span class="brand-pill">Iterative Project</span>
                     <span class="brand-pill">Decision Support</span>
-                    <span class="brand-pill">Signals + Risk + Explainability</span>
+                    <span class="brand-pill">Signals + Risk + Explainability + Assistant</span>
                 </div>
             </div>
         </div>
@@ -2273,26 +2468,26 @@ def _build_workstation_header(result: PrototypeResult, benchmark: str) -> None:
 
 def _build_landing_note() -> None:
     note = (
-        "Lead with Executive Overview, then move through Portfolio Lab, Risk Command, and Explainability Lab "
-        "to tell a clean strategy story."
+        "Use this iteration as a complete research narrative: start with Executive Overview, then move through "
+        "Portfolio Lab, Risk Command, Explainability Lab, and the assistant-supported discussion."
     )
     st.markdown(f'<div class="landing-note">{note}</div>', unsafe_allow_html=True)
 
 
 def _build_quickstart_guide() -> None:
-    st.caption("Suggested review path for project meetings, analyst discussion, or stakeholder evaluation.")
+    st.caption("Suggested review path for the current project iteration, analyst discussion, or stakeholder evaluation.")
     cards = [
         (
             "1. Executive Overview",
-            "Start with total return, risk posture, equity curve, and exposure profile to establish what the strategy did.",
+            "Frame the iteration with total return, risk posture, equity curve, and exposure profile before drilling into details.",
         ),
         (
             "2. Portfolio And Risk",
-            "Move to Portfolio Lab and Risk Command to show where P&L came from, how the book was positioned, and when overlays triggered.",
+            "Use Portfolio Lab and Risk Command to explain allocation behavior, overlay events, and how controls shaped results.",
         ),
         (
             "3. Explainability And Deliverables",
-            "Finish with Explainability Lab for why a position was taken, then export the memo or CSV outputs for handoff.",
+            "Close with Explainability Lab and Workbench Assistant to turn model drivers, memo exports, and Q&A into a clear handoff.",
         ),
     ]
     cols = st.columns(3)
@@ -3486,6 +3681,342 @@ def _build_architecture_and_data_tab(result: PrototypeResult) -> None:
         height=480,
     )
 
+
+def _assistant_settings_from_state() -> AssistantSettings:
+    provider = st.session_state.get("assistant_llm_provider", "OpenAI")
+    try:
+        default_model = get_assistant_default_model(provider).model_id
+    except ValueError:
+        provider = "OpenAI"
+        default_model = get_assistant_default_model(provider).model_id
+    model = st.session_state.get("assistant_llm_model", default_model)
+    api_key = st.session_state.get("assistant_llm_api_key", "")
+    return AssistantSettings(provider=provider, model=model, api_key=api_key)
+
+
+def _assistant_llm_settings_panel():
+    with st.expander("LLM Settings", expanded=True):
+        provider_options = get_assistant_providers()
+        current_provider = st.session_state.get("assistant_llm_provider", "OpenAI")
+        provider_index = provider_options.index(current_provider) if current_provider in provider_options else 0
+        provider = st.selectbox(
+            "Assistant provider",
+            options=provider_options,
+            index=provider_index,
+            key="assistant_llm_provider_select",
+            help="The assistant uses hosted LLM providers only.",
+        )
+        model_options = get_assistant_models_for_provider(provider)
+        default_model_id = get_assistant_default_model(provider).model_id
+        current_model = st.session_state.get("assistant_llm_model", default_model_id)
+        model_index = next((idx for idx, model in enumerate(model_options) if model.model_id == current_model), None)
+        if model_index is None:
+            model_index = next((idx for idx, model in enumerate(model_options) if model.model_id == default_model_id), 0)
+        selected_model = st.selectbox(
+            "Assistant model",
+            options=model_options,
+            index=model_index,
+            format_func=_format_model_option,
+            key=f"assistant_llm_model_select_{provider}",
+            help="The model list is filtered to the selected assistant provider.",
+        )
+        st.caption(_model_detail(selected_model))
+
+        api_key_env = get_api_key_env(provider)
+        st.caption(f"Enter a session-only key below, or set `{api_key_env}` before launching Streamlit.")
+        api_key = st.text_input(
+            f"{provider} API key",
+            value="",
+            type="password",
+            key=f"assistant_llm_api_key_input_{provider}",
+            help="Session-only. This key is not written to disk, reports, chat history, or exports.",
+            placeholder=f"Optional; falls back to {api_key_env}",
+        )
+        runtime = resolve_assistant_runtime_config(provider, selected_model.model_id, ui_api_key=api_key)
+        if runtime.has_api_key:
+            source_label = "UI session key" if runtime.api_key_source == "ui" else runtime.api_key_env
+            st.success(f"Assistant will use {runtime.provider} / {runtime.model} via {source_label}.")
+        else:
+            st.warning(" ".join(runtime.warnings))
+
+        st.session_state["assistant_llm_provider"] = provider
+        st.session_state["assistant_llm_model"] = selected_model.model_id
+        st.session_state["assistant_llm_api_key"] = api_key
+        return AssistantSettings(provider=provider, model=selected_model.model_id, api_key=api_key), runtime
+
+
+def _active_assistant_context():
+    thread = get_active_chat_thread(st.session_state)
+    context_id = thread.get("context_id")
+    context_text = thread.get("context_text", "")
+    if not context_id:
+        return None
+    return find_context(context_id) or unknown_context(context_text)
+
+
+def _append_assistant_response(user_message: str, result: PrototypeResult | None) -> None:
+    settings = _assistant_settings_from_state()
+    active_context = _active_assistant_context()
+    thread = get_active_chat_thread(st.session_state)
+    messages = thread.setdefault("messages", [])
+    response = generate_assistant_response(
+        user_message,
+        settings,
+        active_context=active_context,
+        snapshot=build_run_snapshot(result),
+        history=messages,
+    )
+    messages.append({"role": "assistant", "content": response.answer})
+    set_active_thread_title_from_messages(st.session_state)
+
+
+def _insert_assistant_response_after(user_message: str, message_index: int, result: PrototypeResult | None) -> None:
+    settings = _assistant_settings_from_state()
+    active_context = _active_assistant_context()
+    thread = get_active_chat_thread(st.session_state)
+    messages = thread.setdefault("messages", [])
+    response = generate_assistant_response(
+        user_message,
+        settings,
+        active_context=active_context,
+        snapshot=build_run_snapshot(result),
+        history=messages[: message_index + 1],
+    )
+    insert_at = min(message_index + 1, len(messages))
+    messages.insert(insert_at, {"role": "assistant", "content": response.answer})
+    set_active_thread_title_from_messages(st.session_state)
+
+
+def _rerun_assistant_fragment() -> None:
+    try:
+        st.rerun(scope="fragment")
+    except Exception:
+        st.rerun()
+
+
+def _mount_right_sidebar_toggle() -> None:
+    components.html(
+        """
+        <script>
+        (function () {
+            const doc = window.parent.document;
+            doc.querySelectorAll("a.assistant-edge-toggle").forEach((node) => node.remove());
+            const ensureDrawerClass = () => {
+                const anchor = doc.querySelector(".assistant-rail-anchor");
+                if (!anchor) return;
+                let drawer = anchor.closest(".st-key-assistant-drawer");
+                if (!drawer) {
+                    let node = anchor.parentElement;
+                    while (node && node !== doc.body) {
+                        const text = node.textContent || "";
+                        if (text.includes("Workbench Assistant") && text.includes("LLM Settings")) {
+                            drawer = node;
+                            break;
+                        }
+                        node = node.parentElement;
+                    }
+                }
+                if (drawer) {
+                    drawer.classList.add("st-key-assistant-drawer");
+                }
+            };
+            ensureDrawerClass();
+            window.parent.setTimeout(ensureDrawerClass, 80);
+            window.parent.setTimeout(ensureDrawerClass, 300);
+            if (window.parent.__aqAssistantDrawerObserver) {
+                window.parent.__aqAssistantDrawerObserver.disconnect();
+            }
+            window.parent.__aqAssistantDrawerObserver = new window.parent.MutationObserver(() => {
+                window.parent.clearTimeout(window.parent.__aqAssistantDrawerObserverTimer);
+                window.parent.__aqAssistantDrawerObserverTimer = window.parent.setTimeout(ensureDrawerClass, 80);
+            });
+            window.parent.__aqAssistantDrawerObserver.observe(doc.body, { childList: true, subtree: true });
+
+            let button = doc.getElementById("assistant-edge-toggle");
+            if (!button) {
+                button = doc.createElement("button");
+                button.id = "assistant-edge-toggle";
+                button.type = "button";
+                doc.body.appendChild(button);
+            }
+            button.className = "assistant-edge-toggle";
+            button.setAttribute("aria-label", "Toggle Workbench Assistant");
+            button.setAttribute(
+                "onclick",
+                "const root=document.documentElement;" +
+                "const expanded=!root.classList.contains('aq-assistant-expanded');" +
+                "root.classList.toggle('aq-assistant-expanded', expanded);" +
+                "this.textContent = expanded ? '>>' : '<<';"
+            );
+            doc.documentElement.classList.remove("aq-assistant-expanded");
+            button.textContent = "<<";
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+@st.fragment
+def _render_right_sidebar_assistant(result: PrototypeResult | None) -> None:
+    threads = ensure_chat_threads(st.session_state)
+    st.session_state.setdefault("assistant_delete_target", None)
+    st.session_state.setdefault("assistant_delete_thread_target", None)
+    st.session_state.setdefault("assistant_edit_target", None)
+
+    st.markdown('<div class="assistant-rail-anchor"></div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="assistant-rail-head">
+            <div class="assistant-rail-kicker">API Chat</div>
+            <div class="assistant-rail-title">Workbench Assistant</div>
+            <div class="assistant-rail-copy">
+                Ask about this project iteration, controls, metrics, risk overlays, signals, explainability, or the current run.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    settings, runtime = _assistant_llm_settings_panel()
+    st.caption(f"Runtime: `{runtime.provider}` / `{runtime.model}`")
+    if result is None:
+        st.info("Run the analysis to include live portfolio metrics and risk events in assistant context.")
+
+    thread_ids = [thread["id"] for thread in threads]
+    active_id = st.session_state.get("assistant_active_thread_id", thread_ids[0])
+    if active_id not in thread_ids:
+        active_id = thread_ids[0]
+
+    def _format_thread(thread_id: str) -> str:
+        thread = next(item for item in threads if item["id"] == thread_id)
+        count = len(thread.get("messages", []))
+        suffix = f" ({count})" if count else ""
+        return f"{thread.get('title') or DEFAULT_THREAD_TITLE}{suffix}"
+
+    selected_thread_id = st.selectbox(
+        "Conversation",
+        options=thread_ids,
+        index=thread_ids.index(active_id),
+        format_func=_format_thread,
+        key="assistant_thread_select",
+    )
+    if selected_thread_id != st.session_state.get("assistant_active_thread_id"):
+        st.session_state["assistant_active_thread_id"] = selected_thread_id
+        st.session_state["assistant_delete_target"] = None
+        st.session_state["assistant_edit_target"] = None
+        st.session_state["assistant_delete_thread_target"] = None
+        _rerun_assistant_fragment()
+
+    thread = get_active_chat_thread(st.session_state)
+    chat_cols = st.columns(3)
+    with chat_cols[0]:
+        if st.button("New", use_container_width=True, help="Start a new assistant conversation."):
+            create_chat_thread(st.session_state)
+            st.session_state["assistant_delete_target"] = None
+            st.session_state["assistant_edit_target"] = None
+            st.session_state["assistant_delete_thread_target"] = None
+            _rerun_assistant_fragment()
+    with chat_cols[1]:
+        if st.button("Clear", use_container_width=True, help="Clear only the current conversation."):
+            clear_chat_state(st.session_state)
+            st.session_state["assistant_delete_target"] = None
+            st.session_state["assistant_edit_target"] = None
+            _rerun_assistant_fragment()
+    with chat_cols[2]:
+        if st.button("Delete", use_container_width=True, help="Choose whether to delete the selected conversation."):
+            st.session_state["assistant_delete_thread_target"] = thread["id"]
+            _rerun_assistant_fragment()
+
+    if st.session_state.get("assistant_delete_thread_target") == thread["id"]:
+        st.warning(f"Delete conversation `{_format_thread(thread['id'])}`?")
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("Confirm", key=f"confirm_delete_thread_{thread['id']}", use_container_width=True):
+                delete_chat_thread(st.session_state, thread["id"])
+                st.session_state["assistant_delete_thread_target"] = None
+                st.session_state["assistant_delete_target"] = None
+                st.session_state["assistant_edit_target"] = None
+                _rerun_assistant_fragment()
+        with cancel_col:
+            if st.button("Cancel", key=f"cancel_delete_thread_{thread['id']}", use_container_width=True):
+                st.session_state["assistant_delete_thread_target"] = None
+                _rerun_assistant_fragment()
+
+    active_context = _active_assistant_context()
+    if active_context is not None:
+        st.info(f"Current context: {active_context.label}")
+    else:
+        st.caption("No active context. Ask directly in this conversation.")
+
+    thread = get_active_chat_thread(st.session_state)
+    for idx, message in enumerate(list(thread.get("messages", []))):
+        with st.chat_message(message["role"]):
+            is_editing = st.session_state.get("assistant_edit_target") == idx and message.get("role") == "user"
+            if is_editing:
+                edit_key = f"assistant_edit_text_{idx}"
+                if edit_key not in st.session_state:
+                    st.session_state[edit_key] = message["content"]
+                edited_prompt = st.text_area(
+                    "Edit question",
+                    key=edit_key,
+                    label_visibility="collapsed",
+                )
+                regenerate_col, cancel_col = st.columns([1, 1])
+                with regenerate_col:
+                    if st.button("Regenerate", key=f"regenerate_assistant_message_{idx}", use_container_width=True):
+                        safe_prompt = redact_secrets(edited_prompt, [settings.api_key])
+                        if edit_user_chat_message_for_regeneration(st.session_state, idx, safe_prompt):
+                            st.session_state["assistant_edit_target"] = None
+                            st.session_state["assistant_delete_target"] = None
+                            _insert_assistant_response_after(safe_prompt, idx, result)
+                            _rerun_assistant_fragment()
+                        else:
+                            st.warning("Please enter a non-empty question before regenerating.")
+                with cancel_col:
+                    if st.button("Cancel", key=f"cancel_edit_assistant_message_{idx}", use_container_width=True):
+                        st.session_state["assistant_edit_target"] = None
+                        _rerun_assistant_fragment()
+            else:
+                st.markdown(message["content"])
+            if is_editing:
+                continue
+            if st.session_state.get("assistant_delete_target") == idx:
+                if message.get("role") == "user":
+                    modify_col, delete_col, cancel_col = st.columns([1, 1, 1])
+                    with modify_col:
+                        if st.button("Modify", key=f"modify_assistant_message_{idx}", help="Edit this question and regenerate its answer.", use_container_width=True):
+                            st.session_state["assistant_edit_target"] = idx
+                            st.session_state[f"assistant_edit_text_{idx}"] = message["content"]
+                            st.session_state["assistant_delete_target"] = None
+                            _rerun_assistant_fragment()
+                else:
+                    delete_col, cancel_col = st.columns([1, 1])
+                with delete_col:
+                    if st.button("Delete", key=f"confirm_delete_assistant_message_{idx}", help="Delete only this message.", use_container_width=True):
+                        delete_chat_message(st.session_state, idx)
+                        st.session_state["assistant_delete_target"] = None
+                        st.session_state["assistant_edit_target"] = None
+                        _rerun_assistant_fragment()
+                with cancel_col:
+                    if st.button("Cancel", key=f"cancel_delete_assistant_message_{idx}", use_container_width=True):
+                        st.session_state["assistant_delete_target"] = None
+                        _rerun_assistant_fragment()
+            elif st.button("...", key=f"show_delete_assistant_message_{idx}", help="Show message actions."):
+                st.session_state["assistant_delete_target"] = idx
+                st.session_state["assistant_edit_target"] = None
+                _rerun_assistant_fragment()
+
+    prompt = st.chat_input("Ask about this project iteration", key="workbench_assistant_chat_input")
+    if prompt:
+        safe_prompt = redact_secrets(prompt, [settings.api_key])
+        get_active_chat_thread(st.session_state)["messages"].append({"role": "user", "content": safe_prompt})
+        set_active_thread_title_from_messages(st.session_state)
+        with st.spinner("Calling assistant LLM..."):
+            _append_assistant_response(safe_prompt, result)
+        _rerun_assistant_fragment()
+
+
 def main() -> None:
     _set_page_config()
     _mount_streamlit_theme_bridge()
@@ -3540,6 +4071,8 @@ def main() -> None:
         run_clicked = st.button(RUN_ACTION_LABEL, type="primary", use_container_width=True)
 
     _render_theme(AUTO_THEME_NAME)
+    _mount_right_sidebar_toggle()
+
     _build_brand_banner()
     _build_landing_note()
     _hero()
@@ -3587,41 +4120,41 @@ def main() -> None:
             """
             **Recommended first run**
 
-            - Leave the reference synthetic market selected for the first run.
+            - Leave the reference synthetic market selected to establish a reproducible baseline.
             - Click `Run Analysis` once and wait for the pipeline to finish.
-            - Review the tabs from left to right for the clearest project walkthrough.
+            - Review the tabs from left to right, then use the right assistant panel for project Q&A.
             """
         )
-        st.stop()
+    else:
+        _build_workstation_header(result, benchmark)
+        _build_market_tape(result, benchmark)
+        _build_command_center(result, benchmark)
 
-    _build_workstation_header(result, benchmark)
-    _build_market_tape(result, benchmark)
-    _build_command_center(result, benchmark)
+        tabs = st.tabs(
+            [
+                "Executive Overview",
+                "Portfolio Lab",
+                "Strategy Compare",
+                "Risk Command",
+                "Signal Monitor",
+                "Explainability Lab",
+                "Architecture And Data",
+            ]
+        )
+        with tabs[0]:
+            _build_overview_tab(result, benchmark)
+        with tabs[1]:
+            _build_portfolio_lab_tab(result, benchmark)
+        with tabs[2]:
+            _build_strategy_compare_tab(result, benchmark)
+        with tabs[3]:
+            _build_risk_tab(result)
+        with tabs[4]:
+            _build_signal_monitor_tab(result, benchmark)
+        with tabs[5]:
+            _build_explainability_tab(result)
+        with tabs[6]:
+            _build_architecture_and_data_tab(result)
 
-    tabs = st.tabs(
-        [
-            "Executive Overview",
-            "Portfolio Lab",
-            "Strategy Compare",
-            "Risk Command",
-            "Signal Monitor",
-            "Explainability Lab",
-            "Architecture And Data",
-        ]
-    )
-    with tabs[0]:
-        _build_overview_tab(result, benchmark)
-    with tabs[1]:
-        _build_portfolio_lab_tab(result, benchmark)
-    with tabs[2]:
-        _build_strategy_compare_tab(result, benchmark)
-    with tabs[3]:
-        _build_risk_tab(result)
-    with tabs[4]:
-        _build_signal_monitor_tab(result, benchmark)
-    with tabs[5]:
-        _build_explainability_tab(result)
-    with tabs[6]:
-        _build_architecture_and_data_tab(result)
-
-    st.stop()
+    with st.container():
+        _render_right_sidebar_assistant(st.session_state.get("prototype_result"))

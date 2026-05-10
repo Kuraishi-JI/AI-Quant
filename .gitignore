@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .hypothesis/
 .pytest_temp/
+*.log
 build/
 dist/
 *.egg-info/

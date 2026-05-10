@@ -1,16 +1,17 @@
 # Responsible Quant Advisory Workbench
 
-A team-developed Streamlit workbench for explainable, risk-governed portfolio recommendation research.
+A team-developed Streamlit project iteration for explainable, risk-governed portfolio recommendation research.
 
-This repository packages a collaborative project from the Project Integration research team. It is framed as a decision-support environment rather than an autonomous trading product: the interface combines interpretable signal generation, portfolio construction, risk guardrails, and review-ready reporting in one place.
+This repository packages the current Project Integration iteration as a decision-support environment rather than an autonomous trading product. The interface connects interpretable signal generation, portfolio construction, risk guardrails, review-ready reporting, and a collapsible right-side LLM assistant in one workflow.
 
-The project brings together three practical layers:
+The project brings together four practical layers:
 
 - a weight-centric portfolio construction backbone
 - a risk and stress-testing layer with visible guardrails
 - an explainability workflow that supports analyst review
+- an assistant layer for project Q&A, model settings, and run-context explanations
 
-The result is a reproducible local application that can backtest, surface portfolio risk, and document why the model selected each position.
+The result is a reproducible local application that can backtest, surface portfolio risk, document why the model selected each position, and help reviewers ask targeted questions about the current run.
 
 ## Highlights
 
@@ -19,6 +20,7 @@ The result is a reproducible local application that can backtest, surface portfo
 - risk overlays for max position, volatility targeting, VaR throttling, and drawdown guard
 - benchmark-aware backtesting with turnover, cash buffer, and drawdown tracking
 - explainability views for global importance, local contribution, prediction buckets, and what-if analysis
+- collapsible Workbench Assistant with OpenAI, Anthropic, and Google provider settings
 - downloadable deliverables for performance, decision logs, predictions, and memo export
 
 ## Repository Layout
@@ -29,6 +31,8 @@ The result is a reproducible local application that can backtest, surface portfo
 |-- src/
 |   `-- ai_quant_investing/
 |       |-- __init__.py
+|       |-- assistant.py     # Workbench Assistant prompt, context registry, and chat-state helpers
+|       |-- assistant_llm_settings.py
 |       |-- core/
 |       |   |-- __init__.py
 |       |   |-- data.py         # Demo data generation and CSV loading helpers
@@ -36,6 +40,9 @@ The result is a reproducible local application that can backtest, surface portfo
 |       |-- explainability/
 |       |   |-- __init__.py
 |       |   `-- analysis.py     # Explainability and interpretation helpers
+|       |-- llm/
+|       |   |-- catalog.py      # Hosted LLM provider and model catalog
+|       |   `-- client.py       # Lightweight provider HTTP client
 |       `-- ui/
 |           |-- __init__.py
 |           `-- app.py          # Streamlit layout, styling, and page composition
@@ -69,7 +76,7 @@ pip install -r requirements-dev.txt
 python -m streamlit run app.py
 ```
 
-The default mode runs on a reproducible synthetic multi-asset reference market. You can also upload a wide-form price CSV from the sidebar.
+The default mode runs on a reproducible synthetic multi-asset reference market. You can also upload a wide-form price CSV from the sidebar. The right-side Workbench Assistant is collapsed by default; expand it to choose a hosted LLM provider, enter a session-only API key, and ask questions about the project or current run.
 
 ## Testing
 
@@ -98,6 +105,7 @@ Recommendations:
 - Explainable by default: model interpretation is based on an interpretable Ridge model, permutation importance, local contribution decomposition, and one-factor what-if curves.
 - Governance-aware: risk overlays, drawdown guardrails, and exportable decision logs keep model behavior reviewable.
 - Reproducible by design: the application stays intentionally self-contained and avoids heavyweight market-data or explainability dependencies such as `bt`, `yfinance`, and `shap`.
+- Assistant-supported review: the right-side assistant can answer project, control, metric, risk, and explainability questions without taking over the main workbench.
 - Team presentation ready: the interface is suitable for project review, analyst discussion, and stakeholder communication without being framed as a black-box trading bot.
 
 ## Development Notes
@@ -106,6 +114,7 @@ Recommendations:
 - `src/ai_quant_investing/ui/` contains the Streamlit shell and dashboard behavior.
 - `src/ai_quant_investing/core/` contains the data and portfolio engine.
 - `src/ai_quant_investing/explainability/` contains model interpretation logic.
+- `src/ai_quant_investing/assistant.py` and `src/ai_quant_investing/llm/` contain the right-side assistant and hosted LLM integration.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local development guidance.
 
